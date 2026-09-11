@@ -1,11 +1,10 @@
 """
 Shared utilities for the IDR preprocessing pipeline.
 
-IMPORTANT: The column-name constants below are placeholders based on the
-project status report's description of the raw IO-VNBD files. Update them
-to match the ACTUAL headers in your S-*.csv / V-*.csv files before running
-anything against real data. Both preprocessing stages import from here so
-you only need to fix column names in one place.
+Column-name constants were VERIFIED against real IO-VNBD headers (S-M.csv /
+V-M.csv) on 2026-09-12 -- see the comments above each block. If you're
+running against a different driver/category file, spot-check the headers
+still match before trusting the constants below.
 """
 
 from __future__ import annotations
@@ -17,18 +16,51 @@ import pandas as pd
 # Raw column names (IO-VNBD "M (Driver B)" category) — VERIFY against your
 # actual CSV headers, these are best-guess based on the status report.
 # ---------------------------------------------------------------------------
+# --- S-M.csv (IMU / phone sensor file) --- verified against real IO-VNBD
+# headers on 2026-09-12. Real headers have stray leading/trailing whitespace
+# and inconsistent encoding artifacts in the Â°/Î¼T columns (mojibake from
+# mixed cp1252/UTF-8 in the source file) -- always .strip() column names
+# after read_csv, don't hardcode exact whitespace.
+RAW_ENCODING = "cp1252"  # confirmed: plain utf-8 raises UnicodeDecodeError on 0xB2 (Â°)
 RAW_TIME_COL = "TIME SINCE START (ms)"
+RAW_DATE_COL = "DATE (YYYY-MO-DD HH-MI-SS_SSS)"  # absolute wall-clock timestamp per row
 RAW_IMU_COLS = {
-    "acc_x": "acc_x",
-    "acc_y": "acc_y",
-    "gyro_yaw": "gyro_yaw",
-    "gyro_pitch": "gyro_pitch",
-    "gyro_roll": "gyro_roll",
+    "acc_x": "ACCELEROMETER X (m/s²)",
+    "acc_y": "ACCELEROMETER Y (m/s²)",
+    "gyro_yaw": "GYROSCOPE Yaw (rad/s)",
+    "gyro_pitch": "GYROSCOPE Pitch (rad/s)",
+    "gyro_roll": "GYROSCOPE Roll (rad/s)",
 }
-RAW_GPS_TIME_COL = "TIME SINCE START (ms)"
-RAW_GPS_LAT_COL = "lat"
-RAW_GPS_LON_COL = "lon"
-RAW_GPS_SPEED_COL = "speed"  # set to None if not present in your V-*.csv
+# Raw ACCELEROMETER X/Y/Z includes gravity (confirmed empirically: mean
+# |accelerometer| = 10.01 m/s^2, almost identical to mean |gravity| = 9.81
+# m/s^2; subtracting gravity drops the mean to 1.42 m/s^2, a believable
+# driving-acceleration magnitude). Use these + compensate_gravity() below to
+# get linear acceleration BEFORE it's written into session_XXXX_imu.parquet
+# -- data_contract.md's schema has no room for raw gravity columns, so this
+# has to happen at Stage A (split_sessions.py) read time, not in Stage B.
+RAW_GRAVITY_COLS = {
+    "grav_x": "GRAVITY X (m/s²)",
+    "grav_y": "GRAVITY Y (m/s²)",
+}
+# S also has its OWN embedded GPS (recorded by the same phone, same clock as
+# the IMU -- no sync needed). Useful as a no-alignment-required fallback or a
+# cross-check against V's GPS after offset correction.
+RAW_S_GPS_LAT_COL = "GPS LATITUDE (degrees)"
+RAW_S_GPS_LON_COL = "GPS LONGITUDE (degrees)"
+RAW_S_GPS_SPEED_COL = "GPS SPEED (Kmh)"
+
+# --- V-M.csv (vehicle telemetry / OBD file) --- NOTE: V does NOT share S's
+# clock. V's time column is seconds-since-midnight on a DIFFERENT time
+# reference than S's DATE column -- empirically ~3600s apart (looks like a
+# UTC vs BST offset; confirmed on one real M-category file by matching S's
+# and V's time-of-day RANGES, which are near-identical in duration and only
+# align when V is shifted by +3600s). Use find_time_offset() below per file
+# rather than trusting a hardcoded constant -- other recordings (different
+# dates/seasons) may not be in BST.
+RAW_GPS_TIME_COL = "Time Since Start of Day (seconds)"
+RAW_GPS_LAT_COL = "Latitude (degrees)"
+RAW_GPS_LON_COL = "Longitude (degrees)"
+RAW_GPS_SPEED_COL = "Velocity (km/hr)"
 
 # ---------------------------------------------------------------------------
 # Session-splitting thresholds — tune once you see find_timestamp_breaks
@@ -60,6 +92,55 @@ def find_break_indices(t_ms: np.ndarray) -> np.ndarray:
     is_break = (dt <= BREAK_NEGATIVE_DT) | (dt > BREAK_GAP_SECONDS)
     is_break[0] = False  # dt[0] is NaN, not a real break
     return np.nonzero(is_break)[0]
+
+
+def compensate_gravity(acc_x: np.ndarray, acc_y: np.ndarray,
+                        grav_x: np.ndarray, grav_y: np.ndarray):
+    """
+    Subtract the device-frame gravity component from raw accelerometer
+    readings to get linear (driving) acceleration. Using GRAVITY X/Y (not
+    just a constant 9.81 on one axis) correctly accounts for phone tilt --
+    gravity's projection onto the device's x/y axes changes as the phone
+    rotates, which a fixed constant would miss.
+    """
+    return acc_x - grav_x, acc_y - grav_y
+
+
+def load_raw_csv(path: str, encoding: str = RAW_ENCODING) -> pd.DataFrame:
+    """Read a raw S-*/V-*.csv and strip whitespace from column names, since
+    the real headers have inconsistent leading/trailing spaces."""
+    df = pd.read_csv(path, encoding=encoding)
+    df.columns = df.columns.str.strip()
+    return df
+
+
+def s_time_of_day_sec(s_df: pd.DataFrame) -> np.ndarray:
+    """Convert S-M.csv's DATE column into seconds-since-midnight, local time
+    (as recorded by the phone)."""
+    dt = pd.to_datetime(s_df[RAW_DATE_COL], format="%Y-%m-%d %H:%M:%S:%f")
+    return (dt - dt.dt.normalize()).dt.total_seconds().to_numpy()
+
+
+def find_time_offset(s_tod_sec: np.ndarray, v_tod_sec: np.ndarray,
+                      candidate_range=(-2 * 3600, 2 * 3600), step: int = 1):
+    """
+    Find the offset (seconds) to ADD to V's time-of-day so its range best
+    overlaps S's. Empirically S and V differ by a fixed offset (looks like a
+    UTC/BST timezone gap), not per-sample drift, so matching the overall
+    time-of-day RANGES is enough -- no need for sample-level cross-correlation.
+    Run this per raw file pair; don't assume +3600 always holds (season/date
+    dependent if it really is a DST artifact).
+    """
+    s_min, s_max = float(np.min(s_tod_sec)), float(np.max(s_tod_sec))
+    v_min, v_max = float(np.min(v_tod_sec)), float(np.max(v_tod_sec))
+    best_offset, best_overlap = 0, -1.0
+    for offset in range(candidate_range[0], candidate_range[1] + 1, step):
+        start = max(s_min, v_min + offset)
+        end = min(s_max, v_max + offset)
+        overlap = max(0.0, end - start)
+        if overlap > best_overlap:
+            best_overlap, best_offset = overlap, offset
+    return best_offset, best_overlap
 
 
 def latlon_to_local_xy(lat: np.ndarray, lon: np.ndarray, lat0: float, lon0: float):

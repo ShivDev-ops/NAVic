@@ -23,9 +23,9 @@ import numpy as np
 import pandas as pd
 
 from common import (
-    RAW_TIME_COL, RAW_IMU_COLS, RAW_GPS_TIME_COL, RAW_GPS_LAT_COL,
-    RAW_GPS_LON_COL, RAW_GPS_SPEED_COL, MIN_SESSION_SEC,
-    compute_dt, find_break_indices,
+    RAW_TIME_COL, RAW_IMU_COLS, RAW_GRAVITY_COLS, RAW_GPS_TIME_COL,
+    RAW_GPS_LAT_COL, RAW_GPS_LON_COL, RAW_GPS_SPEED_COL, MIN_SESSION_SEC,
+    compute_dt, find_break_indices, compensate_gravity, load_raw_csv,
 )
 
 
@@ -53,8 +53,9 @@ def split_by_breaks(df: pd.DataFrame, t_ms_col: str, breaks: np.ndarray):
 def process(imu_path: str, gps_path: str, out_dir: str):
     os.makedirs(out_dir, exist_ok=True)
 
-    imu_raw = pd.read_csv(imu_path)
-    gps_raw = pd.read_csv(gps_path)
+    imu_raw = load_raw_csv(imu_path)   # handles real-data encoding (cp1252) + strips
+    gps_raw = load_raw_csv(gps_path)   # whitespace from headers -- plain read_csv()
+                                        # crashes on real S-M.csv with UnicodeDecodeError
 
     imu_t_ms = imu_raw[RAW_TIME_COL].to_numpy()
     gps_t_ms = gps_raw[RAW_GPS_TIME_COL].to_numpy()
@@ -100,10 +101,20 @@ def process(imu_path: str, gps_path: str, out_dir: str):
             f"break detection missed something, investigate before proceeding."
         )
 
+        # Gravity compensation: raw ACCELEROMETER X/Y includes gravity
+        # (confirmed empirically -- see common.py's RAW_GRAVITY_COLS comment).
+        # Subtract it here, at Stage A, since data_contract.md's session
+        # schema has no raw-gravity column for Stage B to do this itself.
+        acc_x_raw = seg[RAW_IMU_COLS["acc_x"]].to_numpy()
+        acc_y_raw = seg[RAW_IMU_COLS["acc_y"]].to_numpy()
+        grav_x = seg[RAW_GRAVITY_COLS["grav_x"]].to_numpy()
+        grav_y = seg[RAW_GRAVITY_COLS["grav_y"]].to_numpy()
+        acc_x, acc_y = compensate_gravity(acc_x_raw, acc_y_raw, grav_x, grav_y)
+
         imu_out = pd.DataFrame({
             "t_sec": t_sec,
-            "acc_x": seg[RAW_IMU_COLS["acc_x"]].to_numpy(),
-            "acc_y": seg[RAW_IMU_COLS["acc_y"]].to_numpy(),
+            "acc_x": acc_x,
+            "acc_y": acc_y,
             "gyro_yaw": seg[RAW_IMU_COLS["gyro_yaw"]].to_numpy(),
             "gyro_pitch": seg[RAW_IMU_COLS["gyro_pitch"]].to_numpy(),
             "gyro_roll": seg[RAW_IMU_COLS["gyro_roll"]].to_numpy(),
