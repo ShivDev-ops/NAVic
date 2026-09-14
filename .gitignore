@@ -4,5 +4,7 @@ data/
 *.npz
 __pycache__/
 *.pyc
+venv/
 .venv/
 .DS_Store
+*.log

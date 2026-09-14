@@ -1,0 +1,80 @@
+{
+  "15s_outage": {
+    "n_episodes_tested": 98,
+    "ai_model_zupt": {
+      "mean_error_m": 138.12257637746382,
+      "median_error_m": 121.97121986919014,
+      "p90_error_m": 276.5328280359959,
+      "std_error_m": 93.23031673104605
+    },
+    "ai_model_raw": {
+      "mean_error_m": 138.11954564374204,
+      "median_error_m": 121.97121986919014,
+      "p90_error_m": 276.5328280359959
+    },
+    "constant_velocity": {
+      "mean_error_m": 113.78530435621228,
+      "median_error_m": 91.24999318843152,
+      "p90_error_m": 245.13061734511294
+    },
+    "naive_double_integration": {
+      "mean_error_m": 118.21384543670744,
+      "median_error_m": 93.20174814656218,
+      "p90_error_m": 232.73966510865733
+    },
+    "error_reduction_vs_naive_pct": -16.8412852717964,
+    "error_reduction_vs_const_pct": -21.388765587041124
+  },
+  "30s_outage": {
+    "n_episodes_tested": 52,
+    "ai_model_zupt": {
+      "mean_error_m": 312.8930078677116,
+      "median_error_m": 276.69090937092056,
+      "p90_error_m": 618.3111081803614,
+      "std_error_m": 228.78511879825507
+    },
+    "ai_model_raw": {
+      "mean_error_m": 312.89427018789377,
+      "median_error_m": 276.69090937092056,
+      "p90_error_m": 618.3111081803614
+    },
+    "constant_velocity": {
+      "mean_error_m": 291.29226270705374,
+      "median_error_m": 245.3657903938563,
+      "p90_error_m": 608.7187615448685
+    },
+    "naive_double_integration": {
+      "mean_error_m": 292.2587021142086,
+      "median_error_m": 264.6826795309814,
+      "p90_error_m": 575.6690967600119
+    },
+    "error_reduction_vs_naive_pct": -7.0602878902266575,
+    "error_reduction_vs_const_pct": -7.4154888152251575
+  },
+  "60s_outage": {
+    "n_episodes_tested": 26,
+    "ai_model_zupt": {
+      "mean_error_m": 574.5529258289835,
+      "median_error_m": 506.7129426475726,
+      "p90_error_m": 1077.8791462213326,
+      "std_error_m": 353.3706434983675
+    },
+    "ai_model_raw": {
+      "mean_error_m": 574.5563350321186,
+      "median_error_m": 506.7129426475726,
+      "p90_error_m": 1077.8791462213326
+    },
+    "constant_velocity": {
+      "mean_error_m": 649.1796801192575,
+      "median_error_m": 506.93129298872395,
+      "p90_error_m": 1228.4181541318892
+    },
+    "naive_double_integration": {
+      "mean_error_m": 706.3085009951548,
+      "median_error_m": 680.5824204702209,
+      "p90_error_m": 1244.8205770545314
+    },
+    "error_reduction_vs_naive_pct": 18.654111479691103,
+    "error_reduction_vs_const_pct": 11.495546853309502
+  }
+}

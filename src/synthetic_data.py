@@ -34,8 +34,14 @@ def make_one_session(rng, session_len_sec, hz_imu=50, hz_gps=1, lat0=28.6, lon0=
 
     imu_df = pd.DataFrame({
         "TIME SINCE START (ms)": t_imu * 1000,
-        "acc_x": acc_x, "acc_y": acc_y,
-        "gyro_yaw": gyro_yaw, "gyro_pitch": gyro_pitch, "gyro_roll": gyro_roll,
+        "ACCELEROMETER X (m/s²)": acc_x, "ACCELEROMETER Y (m/s²)": acc_y,
+        # Synthetic acc_x/acc_y are already "linear" (no gravity mixed in),
+        # so GRAVITY X/Y are 0 here -- compensate_gravity() becomes a no-op
+        # on synthetic data, matching how it always worked before this was
+        # added for real-data gravity removal.
+        "GRAVITY X (m/s²)": np.zeros(n_imu), "GRAVITY Y (m/s²)": np.zeros(n_imu),
+        "GYROSCOPE Yaw (rad/s)": gyro_yaw, "GYROSCOPE Pitch (rad/s)": gyro_pitch,
+        "GYROSCOPE Roll (rad/s)": gyro_roll,
     })
 
     n_gps = int(session_len_sec * hz_gps)
@@ -47,8 +53,9 @@ def make_one_session(rng, session_len_sec, hz_imu=50, hz_gps=1, lat0=28.6, lon0=
     lon = lon0 + (x / (R * np.cos(np.radians(lat0)))) * (180 / np.pi)
 
     gps_df = pd.DataFrame({
-        "TIME SINCE START (ms)": t_gps * 1000,
-        "lat": lat, "lon": lon, "speed": speed[:: hz_imu // hz_gps][:n_gps],
+        "Time Since Start of Day (seconds)": t_gps,
+        "Latitude (degrees)": lat, "Longitude (degrees)": lon,
+        "Velocity (km/hr)": speed[:: hz_imu // hz_gps][:n_gps] * 3.6,
     })
 
     return imu_df, gps_df
@@ -82,8 +89,11 @@ def main():
 
     imu_path = os.path.join(args.out, "S-M.csv")
     gps_path = os.path.join(args.out, "V-M.csv")
-    imu_df.to_csv(imu_path, index=False)
-    gps_df.to_csv(gps_path, index=False)
+    # Write with cp1252 to match how load_raw_csv() reads real IO-VNBD files --
+    # otherwise the "²" in column headers round-trips as mojibake and key
+    # lookups in split_sessions.py fail.
+    imu_df.to_csv(imu_path, index=False, encoding="cp1252")
+    gps_df.to_csv(gps_path, index=False, encoding="cp1252")
     print(f"Wrote {len(imu_df)} IMU rows -> {imu_path}")
     print(f"Wrote {len(gps_df)} GPS rows -> {gps_path}")
     print(f"Contains {args.n_sessions} concatenated sessions with no timestamp reset "
