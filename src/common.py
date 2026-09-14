@@ -210,3 +210,4 @@ def detect_zupt(acc: np.ndarray, gyro: np.ndarray, acc_thresh: float = 0.3,
     acc_mag = np.linalg.norm(acc, axis=1)
     gyro_mag = np.linalg.norm(gyro, axis=1)
     return (acc_mag < acc_thresh) & (gyro_mag < gyro_thresh)
+ 
